@@ -42,19 +42,17 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/auth/login")
 def login_endpoint(req: LoginRequest):
-    success, error = supabase_login(req.email, req.password)
+    success, result = supabase_login(req.email, req.password)
     if success:
-        from auth.supabase_auth import get_current_user
-        user = get_current_user()
         return {
             "success": True,
             "user": {
-                "id": user.id,
-                "email": user.email
+                "id": result.user.id,
+                "email": result.user.email
             }
         }
     else:
-        raise HTTPException(status_code=401, detail=f"Login failed: {error}")
+        raise HTTPException(status_code=401, detail=f"Login failed: {result}")
 
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
