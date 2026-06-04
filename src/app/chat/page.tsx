@@ -60,9 +60,13 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
+      const token = sessionStorage.getItem("access_token");
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token || ""}`
+        },
         body: JSON.stringify({
           messages: updatedMessages.map(m => ({ role: m.role, content: m.content })),
           user_id: user.id,

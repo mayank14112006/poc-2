@@ -44,6 +44,7 @@ export default function LoginPage() {
 
       if (response.ok && data?.success) {
         sessionStorage.setItem("user", JSON.stringify(data.user));
+        sessionStorage.setItem("access_token", data.access_token);
         router.push("/chat");
       } else {
         const errorMsg = data?.detail || `Server error (${response.status}): ${response.statusText || "Could not complete request"}`;

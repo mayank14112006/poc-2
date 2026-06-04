@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional
@@ -9,7 +9,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth.supabase_auth import login as supabase_login
-from guardrails.pii_detector import check_pii
+from guardrails.pii_detector import check_pii, redact_pii
 from guardrails.intent_filter import check_intent
 from guardrails.rate_limiter import check_rate_limit
 from services.civic_kb import build_system_prompt
@@ -46,6 +46,7 @@ def login_endpoint(req: LoginRequest):
     if success:
         return {
             "success": True,
+            "access_token": result.session.access_token,
             "user": {
                 "id": result.user.id,
                 "email": result.user.email
@@ -55,17 +56,29 @@ def login_endpoint(req: LoginRequest):
         raise HTTPException(status_code=401, detail=f"Login failed: {result}")
 
 @app.post("/api/chat")
-def chat_endpoint(req: ChatRequest):
+def chat_endpoint(req: ChatRequest, request: Request):
+    # Verify authentication token (JWT) remotely from Authorization header
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Authentication token missing")
+        
+    try:
+        from auth.supabase_auth import verify_token
+        user_info = verify_token(auth_header)
+        user_id = user_info["id"]
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {e}")
+
     if not req.messages:
         raise HTTPException(status_code=400, detail="Empty messages list")
         
-    user_id = req.user_id
     prompt = req.messages[-1].content
+    redacted_prompt = redact_pii(prompt)
     
     # ── GUARDRAIL G3: Rate limit (cheapest check, do first) ──
     rate_result = check_rate_limit(user_id)
     if not rate_result["allowed"]:
-        log_event(user_id, prompt, "BLOCKED_RATE", blocked_reason=rate_result["reason"])
+        log_event(user_id, redacted_prompt, "BLOCKED_RATE", blocked_reason=rate_result["reason"])
         return {
             "decision": "BLOCKED_RATE",
             "reason": rate_result["reason"],
@@ -75,7 +88,7 @@ def chat_endpoint(req: ChatRequest):
     # ── GUARDRAIL G1: PII detection ──────────────────────────
     pii_result = check_pii(prompt)
     if not pii_result["safe"]:
-        log_event(user_id, prompt, "BLOCKED_PII", blocked_reason=pii_result["reason"])
+        log_event(user_id, redacted_prompt, "BLOCKED_PII", blocked_reason=pii_result["reason"])
         return {
             "decision": "BLOCKED_PII",
             "reason": pii_result["reason"],
@@ -86,7 +99,7 @@ def chat_endpoint(req: ChatRequest):
     intent_result = check_intent(prompt)
     if not intent_result["safe"]:
         blocked_reason_msg = intent_result.get("reason", "Violates safety guidelines.")
-        log_event(user_id, prompt, "BLOCKED_INTENT", blocked_reason=blocked_reason_msg)
+        log_event(user_id, redacted_prompt, "BLOCKED_INTENT", blocked_reason=blocked_reason_msg)
         return {
             "decision": "BLOCKED_INTENT",
             "reason": blocked_reason_msg,
@@ -100,15 +113,14 @@ def chat_endpoint(req: ChatRequest):
         
         # Transform messages for Anthropic API
         messages_formatted = []
-        for m in req.messages:
-            # Strip out warning prefix if previous messages in sequence were blocked
+        for m in req.messages[:-1]:
             content = m.content
             if content.startswith("⚠️ Request Blocked:"):
                 continue
-            messages_formatted.append({"role": m.role, "content": content})
+            # Redact PII from past conversation history to ensure it doesn't leak
+            messages_formatted.append({"role": m.role, "content": redact_pii(content)})
             
-        if not messages_formatted:
-            messages_formatted.append({"role": "user", "content": prompt})
+        messages_formatted.append({"role": "user", "content": redacted_prompt})
 
         # Use claude-sonnet-4-5 for response generation
         response = client.messages.create(
@@ -119,8 +131,8 @@ def chat_endpoint(req: ChatRequest):
         )
         answer = response.content[0].text
         
-        # Log event as allowed
-        log_event(user_id, prompt, "ALLOWED", response=answer)
+        # Log event as allowed (with redacted prompt)
+        log_event(user_id, redacted_prompt, "ALLOWED", response=answer)
         
         return {
             "decision": "ALLOWED",
@@ -131,6 +143,22 @@ def chat_endpoint(req: ChatRequest):
         raise HTTPException(status_code=500, detail=f"Failed to query AI Assistant: {e}")
 
 @app.get("/api/logs")
-def get_logs_endpoint():
+def get_logs_endpoint(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Authentication token missing")
+        
+    try:
+        from auth.supabase_auth import verify_token, is_admin_user
+        user_info = verify_token(auth_header)
+        user_id = user_info["id"]
+        raw_user = user_info["raw_user"]
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {e}")
+        
+    # Authorize: check if admin in database or metadata
+    if not is_admin_user(user_id, raw_user):
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required")
+        
     logs = get_recent_logs(50)
     return {"logs": logs}

@@ -37,7 +37,12 @@ export default function AdminPage() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/logs");
+      const token = sessionStorage.getItem("access_token");
+      const response = await fetch("/api/logs", {
+        headers: {
+          "Authorization": `Bearer ${token || ""}`
+        }
+      });
       let data: any = null;
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("application/json")) {

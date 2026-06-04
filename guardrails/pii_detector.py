@@ -3,39 +3,57 @@ import json
 import anthropic
 from config.settings import ANTHROPIC_API_KEY
 
-PII_PATTERNS = {
-    "credit_card": r"\b\d{4}[\s-]\d{4}[\s-]\d{4}[\s-]\d{4}\b",
-    "aadhaar": r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",
-    "pan": r"\b[A-Z]{5}\d{4}[A-Z]\b",
-    "mobile": r"\b[6-9]\d{9}\b",
-    "password": r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+"
-}
+def redact_pii(text: str) -> str:
+    """
+    Redacts obvious PII with placeholders.
+    """
+    # 1. Credit Card (16 digits, check first to avoid overlap with 12-digit Aadhaar)
+    text = re.sub(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b", "[REDACTED_CARD]", text)
+    
+    # 2. Aadhaar (12 digits)
+    text = re.sub(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}\b", "[REDACTED_AADHAAR]", text)
+    
+    # 3. PAN
+    text = re.sub(r"\b[a-zA-Z]{5}\d{4}[a-zA-Z]\b", "[REDACTED_PAN]", text)
+    
+    # 4. Indian Mobile Numbers
+    text = re.sub(r"(?:\+91[ -]?)?[6-9](?:\d[ -]?){9}\b", "[REDACTED_MOBILE]", text)
+    
+    # 5. Password formats
+    def pwd_replacer(match):
+        prefix = match.group(1)
+        return f"{prefix} [REDACTED_PASSWORD]"
+        
+    text = re.sub(r"(?i)\b((?:my\s+)?(?:password|passwd|pwd)\s*(?:is|[:=]))\s*(\S+)", pwd_replacer, text)
+    
+    return text
 
 def check_pii(text: str) -> dict:
     """
     Checks if the user's message contains personal sensitive information.
-    
-    Returns:
-        {"safe": True} if no PII found
-        {"safe": False, "reason": "..."} if PII found
+    Fail closed: blocks if anything goes wrong.
     """
     # Stage 1: Fast Regex check
-    for pii_type, pattern in PII_PATTERNS.items():
-        if re.search(pattern, text):
-            # Format reasons as requested in tests/guardrail_tests.md
-            reason_map = {
-                "aadhaar": "Contains aadhaar number",
-                "pan": "Contains pan",
-                "credit_card": "Contains credit card",
-                "mobile": "Contains mobile",
-                "password": "Contains password"
-            }
-            reason_text = reason_map.get(pii_type, f"Contains {pii_type.replace('_', ' ')}")
-            return {
-                "safe": False,
-                "reason": reason_text
-            }
-            
+    # Check Credit Card first to avoid 12-digit substring matching in 16-digit cards
+    if re.search(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b", text):
+        return {"safe": False, "reason": "Contains credit card"}
+        
+    # Check Aadhaar
+    if re.search(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}\b", text):
+        return {"safe": False, "reason": "Contains aadhaar number"}
+        
+    # Check PAN
+    if re.search(r"\b[a-zA-Z]{5}\d{4}[a-zA-Z]\b", text):
+        return {"safe": False, "reason": "Contains pan"}
+        
+    # Check Mobile
+    if re.search(r"(?:\+91[ -]?)?[6-9](?:\d[ -]?){9}\b", text):
+        return {"safe": False, "reason": "Contains mobile"}
+        
+    # Check Password
+    if re.search(r"(?i)\b(?:my\s+)?(?:password|passwd|pwd)\s*(?:is|[:=])\s*\S+", text):
+        return {"safe": False, "reason": "Contains password"}
+
     # Stage 2: Haiku classifier for edge cases
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -50,7 +68,6 @@ Respond ONLY with JSON: {"contains_pii": true/false, "reason": "brief reason"}""
         
         raw_content = response.content[0].text.strip()
         
-        # Extract JSON block using regex to handle extra text / markdown wraps
         json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
         if json_match:
             raw_content = json_match.group(0)
@@ -62,7 +79,12 @@ Respond ONLY with JSON: {"contains_pii": true/false, "reason": "brief reason"}""
                 "reason": result.get("reason", "Contains personally identifiable information.")
             }
     except Exception as e:
-        # If API call fails, fail-safe to True or log (for local testing without internet/api keys)
         print(f"PII Haiku classifier error: {e}")
+        # FAIL CLOSED
+        return {
+            "safe": False,
+            "reason": "Safety check unavailable. Please try again later."
+        }
         
     return {"safe": True}
+

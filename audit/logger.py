@@ -1,6 +1,11 @@
+import os
+import json
 from datetime import datetime, timezone
 
 _supabase_client = None
+
+# Fallback log file in project root
+FALLBACK_LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "audit_fallback.log")
 
 def get_supabase():
     global _supabase_client
@@ -21,19 +26,32 @@ def log_event(
 ):
     """
     Logs an interaction event to the audit_logs table in Supabase.
+    If database logging fails, writes to a local fallback file.
     """
+    event_data = {
+        "user_id": user_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "request": request[:2000],  # truncate to prevent excessive length issues
+        "decision": decision,
+        "response": response[:2000] if response else "",
+        "blocked_reason": blocked_reason if blocked_reason else ""
+    }
+    
+    supabase_success = False
     try:
         supabase = get_supabase()
-        supabase.table("audit_logs").insert({
-            "user_id": user_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "request": request[:2000],  # truncate to prevent excessive length issues
-            "decision": decision,
-            "response": response[:2000],
-            "blocked_reason": blocked_reason if blocked_reason else ""
-        }).execute()
+        supabase.table("audit_logs").insert(event_data).execute()
+        supabase_success = True
     except Exception as e:
-        print(f"Failed to log event to Supabase: {e}")
+        print(f"CRITICAL: Failed to log event to Supabase: {e}")
+        
+    if not supabase_success:
+        try:
+            with open(FALLBACK_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(event_data) + "\n")
+            print(f"Audit log fallback: Written to {FALLBACK_LOG_FILE}")
+        except Exception as fe:
+            print(f"CRITICAL ERROR: Failed to write to fallback log file: {fe}")
 
 def get_recent_logs(limit: int = 50):
     """
@@ -49,4 +67,18 @@ def get_recent_logs(limit: int = 50):
         return response.data
     except Exception as e:
         print(f"Failed to fetch recent logs: {e}")
-        return []
+        
+        # Load from fallback file as query fallback
+        fallback_logs = []
+        if os.path.exists(FALLBACK_LOG_FILE):
+            try:
+                with open(FALLBACK_LOG_FILE, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    for line in reversed(lines):
+                        if line.strip():
+                            fallback_logs.append(json.loads(line.strip()))
+                            if len(fallback_logs) >= limit:
+                                break
+            except Exception as fe:
+                print(f"Failed to read fallback logs: {fe}")
+        return fallback_logs
