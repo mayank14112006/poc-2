@@ -1,9 +1,13 @@
-# Pragati Nagar Nigam — Citizen Services AI Assistant
+# Pragati Nagar Nigam — Citizen Services Portal (Next.js + Python)
 
-Citizen-facing municipal portal and chatbot for **Pragati Nagar Nigam**, featuring multi-stage safety guardrails and transaction auditing.
+A secure, high-fidelity citizen-facing portal for **Pragati Nagar Nigam** municipal corporation. 
+
+This application uses the **Next.js frontend stretch goal** connected to a **Python Serverless Backend** via Vercel, gated with multi-stage safety guardrails.
+
+---
 
 ## Live URL
-*(Deploy to Railway or Streamlit Cloud and paste your URL here)*
+*(Deploy to Vercel and paste your URL here)*
 
 ## Test Credentials
 - **Email**: `test@pragati.gov.in`
@@ -15,11 +19,11 @@ Citizen-facing municipal portal and chatbot for **Pragati Nagar Nigam**, featuri
 
 ```mermaid
 graph TD
-    User[Citizen User] -->|1. Sign In / Prompt| App[Streamlit Frontend]
-    App -->|2. Verify Auth| Auth[Supabase Auth]
+    User[Citizen User] -->|1. Sign In / Chat| Frontend[Next.js Client app Router]
+    Frontend -->|2. Secure API Call| API[Vercel Python serverless: api/index.py]
     
-    subgraph Request Pipeline
-        App -->|3. Rate Limit G3| RL[Rate Limiter: Supabase count last 60s]
+    subgraph Python Backend
+        API -->|3. Rate Limit G3| RL[Rate Limiter: Supabase count last 60s]
         RL -->|Passed| PII[PII Detector G1: Regex + Haiku]
         PII -->|Passed| Intent[Intent Filter G2: Haiku safety classifier]
         Intent -->|Passed| Claude[Claude Sonnet 4.5 Core Answerer]
@@ -32,41 +36,40 @@ graph TD
     
     Logger -->|5. Insert Event| DB[(Supabase Postgres)]
     
-    Admin[Admin User] -->|6. Check Logs| AdminView[Streamlit Admin Dashboard]
-    AdminView -->|Query N rows| DB
+    Admin[Admin User] -->|6. Check Logs| AdminView[Next.js Admin Dashboard]
+    AdminView -->|Query logs| API
+    API -->|Fetch N rows| DB
 ```
 
 ---
 
 ## Local Setup
 
-### Prerequisite Environment Variables
-Before running the application locally, you must configure your Infisical Machine Identity credentials:
+### 1. Set Infisical Environment Variables
+Set your Infisical Machine Identity credentials in your terminal:
 ```powershell
 $env:INFISICAL_CLIENT_ID = "your-client-id"
 $env:INFISICAL_CLIENT_SECRET = "your-client-secret"
 $env:INFISICAL_PROJECT_ID = "your-project-id"
 ```
 
-### Installation
-1. Clone this repository.
-2. Install the pinned dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the secure configuration verification script:
-   ```bash
-   python test_config.py
-   ```
-   *Expected Output: `All checks passed! Supabase: OK, Anthropic: OK`*
-4. Run the local Streamlit application:
-   ```bash
-   streamlit run app.py
-   ```
+### 2. Start the Backend API
+Run the Python API server using your virtual environment on port 8000:
+```bash
+.\venv\Scripts\python.exe -m uvicorn api.index:app --port 8000
+```
+
+### 3. Start the Next.js Frontend
+In a new terminal tab, install Node modules and start the Next.js development server:
+```bash
+npm install
+npm run dev
+```
+Open `http://localhost:3000` to interact with the application.
 
 ---
 
-## Guardrail Test Cases
+## Guardrail Test Registry
 
 Below is the verification registry for our security guardrails. All safety triggers show custom notices to the user and log audits directly to Supabase Postgres.
 
@@ -85,7 +88,12 @@ Below is the verification registry for our security guardrails. All safety trigg
 
 ---
 
-## Known Issues & Limitations
-- **Rate Limiting Scalability**: The G3 Rate Limiter uses a direct Postgres count query from the audit logs table. For production scaling, this should be migrated to an in-memory store like Redis.
-- **Latencies**: The Stage 2 fallback for PII check adds roughly 300-500ms of latency during edge-case classification.
-- **Admin Access Level**: The `/admin` multi-page dashboard is visible to any authenticated user under the project. For staging deployment, it should be gated with Role-Based Access Control (RBAC).
+## Vercel Deployment
+
+1. Commit and push code to your GitHub repo.
+2. Link your repo on Vercel.
+3. Configure the following environment variables in the Vercel dashboard:
+   - `INFISICAL_CLIENT_ID`
+   - `INFISICAL_CLIENT_SECRET`
+   - `INFISICAL_PROJECT_ID`
+4. Click **Deploy**. Vercel will build Next.js and your serverless Python routes.
