@@ -36,17 +36,22 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
+      let data: any = null;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      }
 
-      if (response.ok && data.success) {
+      if (response.ok && data?.success) {
         sessionStorage.setItem("user", JSON.stringify(data.user));
         router.push("/chat");
       } else {
-        setError(data.detail || "Authentication failed. Invalid credentials.");
+        const errorMsg = data?.detail || `Server error (${response.status}): ${response.statusText || "Could not complete request"}`;
+        setError(errorMsg);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Connection error. Could not connect to authorization server.");
+      setError(`Connection error: ${err?.message || "Could not connect to authorization server"}`);
     } finally {
       setLoading(false);
     }

@@ -69,9 +69,13 @@ export default function ChatPage() {
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        
+      let data: any = null;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      }
+
+      if (response.ok && data) {
         if (data.decision === "ALLOWED") {
           setMessages((prev) => [
             ...prev,
@@ -85,22 +89,22 @@ export default function ChatPage() {
           ]);
         }
       } else {
-        const errData = await response.json();
+        const detailMsg = data?.detail || `Server error (${response.status}): ${response.statusText || "Query execution failed"}`;
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: `⚠️ System Error: ${errData.detail || "Server failed to process query"}`,
+            content: `⚠️ System Error: ${detailMsg}`,
           },
         ]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: "⚠️ Error: Connection failed. Check if API backend is running.",
+          content: `⚠️ Error: Connection failed (${err?.message || "Could not reach API backend"}).`,
         },
       ]);
     } finally {

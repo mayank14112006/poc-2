@@ -16,8 +16,8 @@ def login(email: str, password: str):
     Authenticates email and password. Works for both Streamlit and FastAPI.
     Returns: (success_bool, session_object_or_error_string)
     """
-    supabase = get_supabase_client()
     try:
+        supabase = get_supabase_client()
         response = supabase.auth.sign_in_with_password({
             "email": email,
             "password": password

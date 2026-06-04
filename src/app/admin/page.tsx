@@ -38,15 +38,21 @@ export default function AdminPage() {
     setError("");
     try {
       const response = await fetch("/api/logs");
-      if (response.ok) {
-        const data = await response.json();
+      let data: any = null;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      }
+
+      if (response.ok && data) {
         setLogs(data.logs);
       } else {
-        setError("Failed to fetch logs from database.");
+        const detailMsg = data?.detail || `Server error (${response.status}): ${response.statusText || "Failed to retrieve logs"}`;
+        setError(detailMsg);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Network error connecting to database.");
+      setError(`Network error: ${err?.message || "Could not connect to database"}`);
     } finally {
       setLoading(false);
     }
