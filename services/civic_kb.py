@@ -1,8 +1,13 @@
 from pathlib import Path
 
+_kb_content = None
+
 def load_kb() -> str:
-    kb_path = Path(__file__).parent.parent / "data" / "civic_kb.md"
-    return kb_path.read_text(encoding="utf-8")
+    global _kb_content
+    if _kb_content is None:
+        kb_path = Path(__file__).parent.parent / "data" / "civic_kb.md"
+        _kb_content = kb_path.read_text(encoding="utf-8")
+    return _kb_content
 
 def build_system_prompt() -> str:
     kb = load_kb()
