@@ -19,32 +19,246 @@ Use the following test credentials to log in:
 
 ## 🏗️ System Architecture
 
-```mermaid
-graph TD
-    User[Citizen User] -->|1. Sign In / Chat| Frontend[Next.js Client App Router]
-    Frontend -->|2. Secure API Call with JWT Bearer Token| API[FastAPI Serverless Backend: api/index.py]
-    
-    subgraph Python Safety Pipeline
-        API -->|3. Verify Supabase JWT & Extract ID| JWT[Remote JWT Validator]
-        JWT -->|4. Rate Limit G3| RL[Rate Limiter: Supabase Request Count]
-        RL -->|Passed| PII[PII Detector G1: Regex + Haiku Fallback]
-        PII -->|Passed & Redacted| Intent[Intent Filter G2: Haiku Safety Classifier on Sanitized Prompt]
-        Intent -->|Passed & Redacted| Claude[Claude Sonnet 4.5 Core Answerer]
-    end
+Below is the text-based architecture mapping, visible on all markdown viewers and devices:
 
-    Claude -->|5. Log ALLOWED| Logger[Audit Logger]
-    RL -->|Blocked BLOCKED_RATE| Logger
-    PII -->|Blocked BLOCKED_PII| Logger
-    Intent -->|Blocked BLOCKED_INTENT| Logger
-    
-    Logger -->|6. Insert Event| DB[(Supabase Postgres)]
-    Logger -.->|Database Log Fail Fallback| LocalLog[audit_fallback.log]
-    
-    Admin[Admin User] -->|7. Check Logs| AdminView[Next.js Admin Dashboard]
-    AdminView -->|Query logs with JWT Bearer| API
-    API -->|8. Verify Admin Auth| AdminAuth[Admin DB/Metadata Check]
-    AdminAuth -->|Authorized| DB
+```text
+               +----------------------------------+
+               |           Citizen User           |
+               +----------------------------------+
+                                |
+                                | 1. Access portal & login (Supabase Auth)
+                                v
+               +----------------------------------+
+               |     Next.js Frontend Client      |
+               +----------------------------------+
+                                |
+                                | 2. Send API Call (with JWT Bearer Token)
+                                v
+               +----------------------------------+
+               |     FastAPI Serverless Route     |
+               |         (api/index.py)           |
+               +----------------------------------+
+                                |
+                                | 3. Authenticate JWT (supabase.auth.get_user)
+                                v
+               +----------------------------------+
+               |       Rate Limiter Check         | ----> [BLOCKED_RATE] ---> Log Event
+               +----------------------------------+
+                                |
+                                | 4. Check Rate Limit (gte 60s count < 10)
+                                v
+               +----------------------------------+
+               |       Regex PII Detector         | ----> [BLOCKED_PII] ---> Log Event
+               +----------------------------------+
+                                |
+                                | 5. Pass Regex? (Block raw PII immediately)
+                                v
+               +----------------------------------+
+               |      Haiku PII Classifier        | ----> [BLOCKED_PII] ---> Log Event
+               +----------------------------------+
+                                |
+                                | 6. Verify with Haiku (Redact & Sanitize prompt)
+                                v
+               +----------------------------------+
+               |      Haiku Intent Filter         | ----> [BLOCKED_INTENT] -> Log Event
+               +----------------------------------+
+                                |
+                                | 7. Pass Intent? (Runs on sanitized input only)
+                                v
+               +----------------------------------+
+               |      Claude Sonnet 4.5 Core      |
+               |        Civic Answerer            |
+               +----------------------------------+
+                                |
+                                | 8. Respond & Audit Log
+                                v
+               +----------------------------------+
+               |         Supabase Database        | <--- (Fallback to local file
+               |          ("audit_logs")          |       "audit_fallback.log")
+               +----------------------------------+
 ```
+
+For a visual representation of the architecture:
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 760" width="100%" style="background:#090d16; border-radius:12px; border: 1px solid #1e293b; font-family: system-ui, -apple-system, sans-serif;">
+  <!-- Gradients & Markers -->
+  <defs>
+    <linearGradient id="userGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="clientGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+    <linearGradient id="backendGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="gateGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+    <linearGradient id="claudeGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f472b6" />
+      <stop offset="100%" stop-color="#db2777" />
+    </linearGradient>
+    <linearGradient id="dbGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="480" y="35" text-anchor="middle" fill="#f8fafc" font-size="20" font-weight="bold" letter-spacing="0.5">
+    🏛️ PRAGATI NAGAR NIGAM — SYSTEM ARCHITECTURE
+  </text>
+  <text x="480" y="55" text-anchor="middle" fill="#64748b" font-size="12">
+    Sequential Security Pipeline &amp; Verification Flow
+  </text>
+
+  <!-- Actor: Citizen User -->
+  <g transform="translate(60, 90)">
+    <rect width="180" height="60" rx="8" fill="url(#userGrad)" opacity="0.15" stroke="#38bdf8" stroke-width="1.5" />
+    <rect width="180" height="60" rx="8" fill="none" stroke="#38bdf8" stroke-dasharray="4" stroke-width="1" opacity="0.5" />
+    <text x="90" y="26" text-anchor="middle" fill="#f8fafc" font-size="14" font-weight="bold">Citizen User</text>
+    <text x="90" y="44" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="500">Browser / Chat Client</text>
+  </g>
+
+  <!-- Actor: Admin Auditor -->
+  <g transform="translate(720, 90)">
+    <rect width="180" height="60" rx="8" fill="url(#userGrad)" opacity="0.15" stroke="#38bdf8" stroke-width="1.5" />
+    <rect width="180" height="60" rx="8" fill="none" stroke="#38bdf8" stroke-dasharray="4" stroke-width="1" opacity="0.5" />
+    <text x="90" y="26" text-anchor="middle" fill="#f8fafc" font-size="14" font-weight="bold">Admin Auditor</text>
+    <text x="90" y="44" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="500">Dashboard Viewer</text>
+  </g>
+
+  <!-- Client Frontend -->
+  <g transform="translate(60, 220)">
+    <rect width="180" height="70" rx="8" fill="url(#clientGrad)" opacity="0.2" stroke="#818cf8" stroke-width="2" />
+    <text x="90" y="30" text-anchor="middle" fill="#f8fafc" font-size="13" font-weight="bold">Next.js Web Client</text>
+    <text x="90" y="48" text-anchor="middle" fill="#a5b4fc" font-size="11">App Router (Vercel)</text>
+    <text x="90" y="60" text-anchor="middle" fill="#64748b" font-size="9">sessionStorage Auth Token</text>
+  </g>
+
+  <!-- Admin Dashboard -->
+  <g transform="translate(720, 220)">
+    <rect width="180" height="70" rx="8" fill="url(#clientGrad)" opacity="0.2" stroke="#818cf8" stroke-width="2" />
+    <text x="90" y="30" text-anchor="middle" fill="#f8fafc" font-size="13" font-weight="bold">Admin Dashboard</text>
+    <text x="90" y="48" text-anchor="middle" fill="#a5b4fc" font-size="11">Route: /admin</text>
+    <text x="90" y="60" text-anchor="middle" fill="#64748b" font-size="9">Renders Last 50 Logs</text>
+  </g>
+
+  <!-- FastAPI Backend API Gate -->
+  <g transform="translate(350, 220)">
+    <rect width="260" height="70" rx="8" fill="url(#backendGrad)" opacity="0.2" stroke="#34d399" stroke-width="2" />
+    <text x="130" y="30" text-anchor="middle" fill="#f8fafc" font-size="14" font-weight="bold">FastAPI Serverless Endpoint</text>
+    <text x="130" y="48" text-anchor="middle" fill="#a7f3d0" font-size="11">Python Backend (api/index.py)</text>
+    <text x="130" y="60" text-anchor="middle" fill="#64748b" font-size="9">JWT Token Parsing &amp; Routing</text>
+  </g>
+
+  <!-- Sequential Security Pipeline Container -->
+  <g transform="translate(320, 335)">
+    <!-- Container Box -->
+    <rect width="320" height="345" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5" stroke-dasharray="6 4" />
+    <text x="160" y="-10" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="bold" letter-spacing="1">
+      SEQUENTIAL SAFETY GATES (FAIL-CLOSED)
+    </text>
+
+    <!-- Step 1: JWT Authenticator -->
+    <g transform="translate(20, 20)">
+      <rect width="280" height="40" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1" />
+      <text x="140" y="24" text-anchor="middle" fill="#f1f5f9" font-size="11" font-weight="bold">1. Supabase JWT Authentication</text>
+    </g>
+
+    <!-- Step 2: Rate Limiter (G3) -->
+    <g transform="translate(20, 75)">
+      <rect width="280" height="40" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1" />
+      <text x="140" y="24" text-anchor="middle" fill="#f1f5f9" font-size="11" font-weight="bold">2. Rate Limiter Check (G3)</text>
+    </g>
+
+    <!-- Step 3: Regex PII Block (G1) -->
+    <g transform="translate(20, 130)">
+      <rect width="280" height="40" rx="6" fill="url(#gateGrad)" opacity="0.15" stroke="#f59e0b" stroke-width="1.2" />
+      <rect width="280" height="40" rx="6" fill="none" stroke="#f59e0b" stroke-width="1" />
+      <text x="140" y="24" text-anchor="middle" fill="#fef3c7" font-size="11" font-weight="bold">3. Regex PII Detector &amp; Block (G1)</text>
+    </g>
+
+    <!-- Step 4: Haiku PII Redactor (G1 Fallback) -->
+    <g transform="translate(20, 185)">
+      <rect width="280" height="40" rx="6" fill="url(#gateGrad)" opacity="0.15" stroke="#f59e0b" stroke-width="1.2" />
+      <rect width="280" height="40" rx="6" fill="none" stroke="#f59e0b" stroke-width="1" />
+      <text x="140" y="24" text-anchor="middle" fill="#fef3c7" font-size="11" font-weight="bold">4. Haiku PII Classifier (Redacts Prompt)</text>
+    </g>
+
+    <!-- Step 5: Haiku Intent Classifier (G2) -->
+    <g transform="translate(20, 240)">
+      <rect width="280" height="40" rx="6" fill="url(#gateGrad)" opacity="0.15" stroke="#f59e0b" stroke-width="1.2" />
+      <rect width="280" height="40" rx="6" fill="none" stroke="#f59e0b" stroke-width="1" />
+      <text x="140" y="24" text-anchor="middle" fill="#fef3c7" font-size="11" font-weight="bold">5. Intent Filter on Sanitized Input (G2)</text>
+    </g>
+
+    <!-- Step 6: Claude Sonnet Core -->
+    <g transform="translate(20, 295)">
+      <rect width="280" height="40" rx="6" fill="url(#claudeGrad)" opacity="0.2" stroke="#f472b6" stroke-width="1.5" />
+      <text x="140" y="24" text-anchor="middle" fill="#fdf2f8" font-size="12" font-weight="bold">6. Claude Sonnet 4.5 Core Answerer</text>
+    </g>
+  </g>
+
+  <!-- Database & Audits -->
+  <g transform="translate(350, 705)">
+    <rect width="260" height="45" rx="6" fill="url(#dbGrad)" opacity="0.15" stroke="#c084fc" stroke-width="1.5" />
+    <text x="130" y="26" text-anchor="middle" fill="#faf5ff" font-size="12" font-weight="bold">Supabase Postgres Database</text>
+    <text x="130" y="38" text-anchor="middle" fill="#c084fc" font-size="9">Table: audit_logs &amp; admin_users</text>
+  </g>
+
+  <!-- Flow Arrows & Labels -->
+  <!-- Citizen User -> Client Frontend -->
+  <path d="M 150 150 L 150 220" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)" />
+  <text x="145" y="190" text-anchor="end" fill="#64748b" font-size="10">1. Sign In &amp; Ask</text>
+
+  <!-- Client Frontend -> FastAPI Backend -->
+  <path d="M 240 255 L 350 255" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)" />
+  <text x="295" y="245" text-anchor="middle" fill="#64748b" font-size="9">2. Secure HTTP POST</text>
+  <text x="295" y="270" text-anchor="middle" fill="#4f46e5" font-size="9" font-weight="bold">Bearer JWT</text>
+
+  <!-- FastAPI Backend -> Pipeline Step 1 -->
+  <path d="M 480 290 L 480 355" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)" />
+
+  <!-- Inside Pipeline Inter-Step Connections -->
+  <path d="M 480 395 L 480 410" fill="none" stroke="#64748b" stroke-width="1" marker-end="url(#arrow)" />
+  <path d="M 480 450 L 480 465" fill="none" stroke="#64748b" stroke-width="1" marker-end="url(#arrow)" />
+  <path d="M 480 505 L 480 520" fill="none" stroke="#64748b" stroke-width="1" marker-end="url(#arrow)" />
+  <path d="M 480 560 L 480 575" fill="none" stroke="#64748b" stroke-width="1" marker-end="url(#arrow)" />
+  <path d="M 480 615 L 480 630" fill="none" stroke="#64748b" stroke-width="1" marker-end="url(#arrow)" />
+
+  <!-- Core LLM / Pipeline -> Supabase DB -->
+  <path d="M 480 680 L 480 705" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow)" />
+  <text x="485" y="691" text-anchor="start" fill="#34d399" font-size="10" font-weight="bold">Log Event (Redacted)</text>
+
+  <!-- Admin Auditor -> Admin Dashboard -->
+  <path d="M 810 150 L 810 220" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)" />
+  <text x="815" y="190" text-anchor="start" fill="#64748b" font-size="10">View Audit Log</text>
+
+  <!-- Admin Dashboard -> FastAPI Backend -->
+  <path d="M 720 255 L 610 255" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)" />
+  <text x="665" y="245" text-anchor="middle" fill="#64748b" font-size="9">Get Logs Request</text>
+
+  <!-- DB verification back to API -->
+  <path d="M 570 705 L 625 620 L 590 290" fill="none" stroke="#818cf8" stroke-width="1" stroke-dasharray="3 3" />
+  <text x="618" y="520" text-anchor="start" fill="#818cf8" font-size="9">Verify Admin Table</text>
+
+  <!-- Blocked Log Route (Side path to DB) -->
+  <path d="M 600 455 C 680 455, 680 680, 570 705" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="4 2" marker-end="url(#arrow-orange)" />
+  <text x="660" y="580" text-anchor="middle" fill="#f59e0b" font-size="9" font-weight="bold">FAIL-CLOSED BLOCK</text>
+  <text x="660" y="592" text-anchor="middle" fill="#94a3b8" font-size="8">Logs Block Reason</text>
+</svg>
 
 ---
 
