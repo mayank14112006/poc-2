@@ -3,13 +3,21 @@ import re
 import anthropic
 from config.settings import ANTHROPIC_API_KEY
 
+_anthropic_client = None
+
+def get_anthropic_client():
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _anthropic_client
+
 def check_intent(text: str) -> dict:
     """
     Checks if the user's intent is malicious, off-topic, or jailbreak.
     Fail closed: blocks if anything goes wrong.
     """
     try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = get_anthropic_client()
         response = client.messages.create(
             model="claude-haiku-4-5",
             max_tokens=150,

@@ -9,7 +9,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth.supabase_auth import login as supabase_login
-from guardrails.pii_detector import check_pii, redact_pii
+from guardrails.pii_detector import check_pii, redact_pii, get_anthropic_client
 from guardrails.intent_filter import check_intent
 from guardrails.rate_limiter import check_rate_limit
 from services.civic_kb import build_system_prompt
@@ -108,7 +108,7 @@ def chat_endpoint(req: ChatRequest, request: Request):
         
     # ── ALL GUARDRAILS PASSED — call Claude ──────────────────
     try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = get_anthropic_client()
         SYSTEM_PROMPT = build_system_prompt()
         
         # Transform messages for Anthropic API
