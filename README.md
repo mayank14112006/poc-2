@@ -1,14 +1,19 @@
 # 🏛️ Pragati Nagar Nigam — Citizen Services AI Assistant
 
-A high-fidelity, secure citizen-facing portal for the fictional **Pragati Nagar Nigam** municipal corporation in India. Built using **Next.js (App Router)** on the frontend and **Python FastAPI** on the backend, deployed serverlessly on Vercel.
+A prototype citizen-facing portal for the fictional **Pragati Nagar Nigam** municipal corporation in India. Built using **Next.js (App Router)** on the frontend and **Python FastAPI** on the backend, deployed serverlessly on Vercel.
 
-The assistant is locked behind a strict security architecture featuring remote **Supabase JWT token validation**, multi-layer **safety guardrails**, **PII redaction** prior to logging and LLM ingestion, and an authorized **Admin logs dashboard**.
+The assistant includes remote **Supabase JWT token validation**, multi-layer **safety guardrails**, **PII redaction** prior to logging and LLM ingestion, and an **Admin logs dashboard**.
 
 ---
 
 ## 🚀 Live Production URL
 You can access the live deployed site at:
 👉 **[https://poc-2-git-main-mayank14112006s-projects.vercel.app/chat](https://poc-2-git-main-mayank14112006s-projects.vercel.app/chat)**
+
+### 🔑 Test Credentials
+Use the following test credentials to log in:
+- **Email**: `test@pragati.gov.in`
+- **Password**: `Test@1234`
 
 ---
 
@@ -23,7 +28,7 @@ graph TD
         API -->|3. Verify Supabase JWT & Extract ID| JWT[Remote JWT Validator]
         JWT -->|4. Rate Limit G3| RL[Rate Limiter: Supabase Request Count]
         RL -->|Passed| PII[PII Detector G1: Regex + Haiku Fallback]
-        PII -->|Passed| Intent[Intent Filter G2: Haiku Safety Classifier]
+        PII -->|Passed & Redacted| Intent[Intent Filter G2: Haiku Safety Classifier on Sanitized Prompt]
         Intent -->|Passed & Redacted| Claude[Claude Sonnet 4.5 Core Answerer]
     end
 
@@ -43,9 +48,17 @@ graph TD
 
 ---
 
-## 🛡️ Security Guardrails & Verification Registry
+## 🛡️ Sequential Guardrails Flow & Verification Registry
 
-All requests are checked sequentially. If any safety check fails, the backend blocks the request and log it safely after redacting raw PII.
+All requests are processed sequentially:
+1. **Authenticate User**: Verifies the Supabase JWT and rejects unauthenticated requests.
+2. **Rate Limiter (G3)**: Rejects the request if the count exceeds 10 queries per 60 seconds.
+3. **Regex PII Detector (G1)**: Rejects the request if Aadhaar, PAN, Credit Card, Mobile, or Password patterns are matched. Real PII is blocked instantly and never sent to subsequent safety classifiers or the core LLM.
+4. **Haiku PII Classifier (G1 Fallback)**: Catches edge-case PII and blocks if unsafe.
+5. **Intent Classifier (G2)**: Processes the **sanitized (redacted)** prompt to check for jailbreaks, prompt injection, hacking requests, or off-topic abuse.
+6. **Civic LLM**: Generates the final answer using the **sanitized** prompt and the knowledge base.
+
+All safety decisions log redacted request payloads and full blocked responses.
 
 | Test Case / Prompt | Expected Result | Guardrail Tested | Actual Behavior |
 |:---|:---|:---|:---|
@@ -59,37 +72,29 @@ All requests are checked sequentially. If any safety check fails, the backend bl
 | `What is the capital of France?` | `BLOCKED_INTENT` | G2: Intent Filter | Rejects off-topic prompts. |
 | `How do I pay my property tax?` | `ALLOWED` | Core Civic KB LLM | Query passes all safety checks and gets answered by Claude. |
 
-### G3: Rate Limiting
-- **Rule**: Max 10 requests per 60 seconds per user.
-- **Verification**: Sending 11 requests in under a minute returns `BLOCKED_RATE` on the 11th request.
-
 ---
 
 ## 🔑 Secret Key Management (Infisical)
 
-Secrets management is powered by **Infisical**. In production, Infisical Universal Auth Machine Identity is mandatory to load application keys. Direct `.env` fallbacks are supported for local development purposes only.
+Secrets management is powered by **Infisical**. In production, the environment should contain only the following three Infisical machine identity credentials:
+- `INFISICAL_CLIENT_ID`
+- `INFISICAL_CLIENT_SECRET`
+- `INFISICAL_PROJECT_ID`
 
-### Required Secrets
-The project requires exactly the following seven secrets:
-1. `ANTHROPIC_API_KEY`: Anthropic developer console API key.
-2. `SUPABASE_URL`: Supabase project URL endpoint.
-3. `SUPABASE_ANON_KEY`: Supabase client anonymous API key.
-4. `SUPABASE_SERVICE_ROLE_KEY`: Supabase bypass-RLS service role key (used for audit logs insertion and admin query).
-5. `INFISICAL_CLIENT_ID`: Machine Identity Client ID.
-6. `INFISICAL_CLIENT_SECRET`: Machine Identity Client Secret.
-7. `INFISICAL_PROJECT_ID`: Infisical project UUID.
+At runtime, the application authenticates with Infisical and pulls the actual keys:
+*   `ANTHROPIC_API_KEY`
+*   `SUPABASE_URL`
+*   `SUPABASE_ANON_KEY`
+*   `SUPABASE_SERVICE_ROLE_KEY`
 
-> [!WARNING]
-> Do NOT store admin identity configuration keys (`ADMIN_EMAIL` or `ADMIN_USER_ID`) in Infisical. Administrative authorization is handled directly in the database.
+> [!NOTE]
+> Do NOT store admin identity configuration keys (`ADMIN_EMAIL` or `ADMIN_USER_ID`) in Infisical. Administrative authorization is handled directly in the database. Direct `.env` files are allowed only as a fallback for local development.
 
 ---
 
 ## 💾 Database Schemas (Supabase)
 
-Initialize the following tables in your Supabase Postgres database.
-
 ### 1. `audit_logs` Table
-Used to audit citizen interactions and security decisions.
 ```sql
 create table audit_logs (
   id bigint generated by default as identity primary key,
@@ -103,7 +108,6 @@ create table audit_logs (
 ```
 
 ### 2. `admin_users` Table
-Holds the list of authorized administrators.
 ```sql
 create table admin_users (
   id uuid default gen_random_uuid() primary key,
@@ -148,7 +152,7 @@ ANTHROPIC_API_KEY=your-anthropic-api-key
    npm install
    npm run dev
    ```
-3. Open `http://localhost:3000` to interact with the application. Local API calls will be automatically proxied to port 8000.
+3. Open `http://localhost:3000` to interact with the application.
 
 ---
 
@@ -157,13 +161,9 @@ ANTHROPIC_API_KEY=your-anthropic-api-key
 ### How to Create a Test User
 1. Go to your **Supabase Dashboard -> Authentication -> Users**.
 2. Click **Add User -> Create User**.
-3. Create a test user with:
-   - **Email**: `test@pragati.gov.in`
-   - **Password**: `Test@1234`
-4. Confirm user creation (verification email is disabled).
+3. Create a test user with your test email and password.
 
 ### How to Promote a User to Admin
-To grant a user access to the security logs dashboard `/admin`:
 - **Approach A (Recommended)**: Insert their user UUID into the `admin_users` table:
   ```sql
   insert into admin_users (user_id, email)
@@ -178,18 +178,7 @@ To grant a user access to the security logs dashboard `/admin`:
 
 ---
 
-## 🚀 Vercel Production Deployment
-
-The project is structured as a Vercel monorepo and compiles out of the box.
-
-1. **Fork the repository** on GitHub.
-2. Link your GitHub fork to a **new project** in Vercel.
-3. Configure the **Environment Variables** in the Vercel dashboard. Add all seven required secrets.
-4. Vercel automatically deploys the Next.js app and compiles `api/index.py` as a serverless FastAPI handler.
-5. In production, edge rewrites handle routes cleanly without proxying to localhost.
-
----
-
 ## ⚠️ Known Limitations
-- **Supabase JWT Verification Round-Trip**: The backend calls `supabase.auth.get_user(token)` to verify access tokens. This introduces a small latency but ensures user accounts are not disabled or expired.
-- **Fail-Closed Locking**: If the Anthropic API is rate-limited or fails, the safety filters will block the request and return `"Safety check unavailable. Please try again later."` to guarantee zero bypassed violations.
+1.  **sessionStorage Session Storage**: Frontend session state and token JWTs are stored in client-side `sessionStorage` rather than `HttpOnly` cookies. This is done to prevent routing and rewrite complexity in Vercel serverless functions, but means session tokens are vulnerable to hypothetical cross-site scripting (XSS) attacks.
+2.  **Rate Limiting Fail-Open**: If the Supabase database connection is down or fails, the rate limiter fails open to ensure citizen access is not completely blocked, logging the error and letting requests pass.
+3.  **Supabase JWT API Latency**: Remotely validating tokens on every request adds overhead, which is mitigated via a warm in-memory container cache (5 minutes TTL).

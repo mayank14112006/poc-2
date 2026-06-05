@@ -126,3 +126,81 @@ def test_fail_closed_intent(monkeypatch):
     res = check_intent("Hello there, safe text")
     assert not res["safe"]
     assert "safety check unavailable" in res["reason"].lower()
+
+# 6. Additional Required Test Cases (Compliance Specs)
+def test_off_topic_blocked(monkeypatch):
+    # Mock checks and return unsafe / off-topic
+    monkeypatch.setattr("auth.supabase_auth.verify_token", lambda h: {"id": "u", "email": "e", "raw_user": object()})
+    monkeypatch.setattr("api.index.check_rate_limit", lambda uid: {"allowed": True})
+    monkeypatch.setattr("api.index.check_pii", lambda text: {"safe": True})
+    monkeypatch.setattr("api.index.check_intent", lambda text: {"safe": False, "reason": "Off-topic prompt"})
+    monkeypatch.setattr("api.index.log_event", lambda *args, **kwargs: None)
+    
+    response = client.post(
+        "/api/chat",
+        headers={"Authorization": "Bearer valid_token"},
+        json={"messages": [{"role": "user", "content": "What is the capital of France?"}], "user_id": "u"}
+    )
+    assert response.status_code == 200
+    assert response.json()["decision"] == "BLOCKED_INTENT"
+
+def test_valid_civic_prompt_allowed(monkeypatch):
+    monkeypatch.setattr("auth.supabase_auth.verify_token", lambda h: {"id": "u", "email": "e", "raw_user": object()})
+    monkeypatch.setattr("api.index.check_rate_limit", lambda uid: {"allowed": True})
+    monkeypatch.setattr("api.index.check_pii", lambda text: {"safe": True})
+    monkeypatch.setattr("api.index.check_intent", lambda text: {"safe": True, "reason": ""})
+    monkeypatch.setattr("api.index.log_event", lambda *args, **kwargs: None)
+    
+    class DummyContent:
+        text = "You can pay your property tax online at the PNN portal."
+    class DummyResponse:
+        content = [DummyContent()]
+    monkeypatch.setattr("anthropic.resources.Messages.create", lambda *args, **kwargs: DummyResponse())
+    
+    response = client.post(
+        "/api/chat",
+        headers={"Authorization": "Bearer valid_token"},
+        json={"messages": [{"role": "user", "content": "How do I pay my property tax?"}], "user_id": "u"}
+    )
+    assert response.status_code == 200
+    assert response.json()["decision"] == "ALLOWED"
+    assert "property tax" in response.json()["response"].lower()
+
+def test_blocked_audit_log_contents(monkeypatch):
+    # Mock verify_token
+    def mock_verify_token(header):
+        return {"id": "user-uuid", "email": "citizen@pragati.gov.in", "raw_user": object()}
+    monkeypatch.setattr("auth.supabase_auth.verify_token", mock_verify_token)
+    monkeypatch.setattr("api.index.check_rate_limit", lambda uid: {"allowed": True})
+    
+    # Store logged events to check
+    logged_events = []
+    def mock_log_event(user_id, request, decision, response="", blocked_reason=""):
+        logged_events.append({
+            "user_id": user_id,
+            "request": request,
+            "decision": decision,
+            "response": response,
+            "blocked_reason": blocked_reason
+        })
+    monkeypatch.setattr("api.index.log_event", mock_log_event)
+    
+    # Send PII prompt
+    response = client.post(
+        "/api/chat",
+        headers={"Authorization": "Bearer valid_token"},
+        json={"messages": [{"role": "user", "content": "My Aadhaar is 1234-5678-9012"}], "user_id": "user-uuid"}
+    )
+    
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json["decision"] == "BLOCKED_PII"
+    assert "1234-5678-9012" not in res_json["response"]
+    
+    # Verify log entry contains redacted request and full blocked response string
+    assert len(logged_events) == 1
+    event = logged_events[0]
+    assert event["decision"] == "BLOCKED_PII"
+    assert "1234-5678-9012" not in event["request"]
+    assert "[REDACTED_AADHAAR]" in event["request"]
+    assert event["response"] == res_json["response"]

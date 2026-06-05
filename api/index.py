@@ -75,43 +75,41 @@ def chat_endpoint(req: ChatRequest, request: Request):
     prompt = req.messages[-1].content
     redacted_prompt = redact_pii(prompt)
     
-    # Run guardrails in parallel to eliminate sequential API round-trips
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        rate_future = executor.submit(check_rate_limit, user_id)
-        pii_future = executor.submit(check_pii, prompt)
-        intent_future = executor.submit(check_intent, prompt)
-        
-        rate_result = rate_future.result()
-        pii_result = pii_future.result()
-        intent_result = intent_future.result()
-
     # ── GUARDRAIL G3: Rate limit ──
+    rate_result = check_rate_limit(user_id)
     if not rate_result["allowed"]:
-        log_event(user_id, redacted_prompt, "BLOCKED_RATE", blocked_reason=rate_result["reason"])
+        blocked_response = f"⚠️ Request Blocked: {rate_result['reason']}"
+        log_event(user_id, redacted_prompt, "BLOCKED_RATE", response=blocked_response, blocked_reason=rate_result["reason"])
         return {
             "decision": "BLOCKED_RATE",
             "reason": rate_result["reason"],
-            "response": f"⚠️ Request Blocked: {rate_result['reason']}"
+            "response": blocked_response
         }
         
     # ── GUARDRAIL G1: PII detection ──────────────────────────
+    # Checks obvious PII using fast regex first, then Haiku fallback.
+    # Blocked immediately if detected. Obvious PII is not sent to the intent classifier or core LLM.
+    pii_result = check_pii(prompt)
     if not pii_result["safe"]:
-        log_event(user_id, redacted_prompt, "BLOCKED_PII", blocked_reason=pii_result["reason"])
+        blocked_response = f"⚠️ Request Blocked: {pii_result['reason']}"
+        log_event(user_id, redacted_prompt, "BLOCKED_PII", response=blocked_response, blocked_reason=pii_result["reason"])
         return {
             "decision": "BLOCKED_PII",
             "reason": pii_result["reason"],
-            "response": f"⚠️ Request Blocked: {pii_result['reason']}"
+            "response": blocked_response
         }
         
     # ── GUARDRAIL G2: Intent filter ──────────────────────────
+    # The intent classifier receives only the sanitized/redacted input.
+    intent_result = check_intent(redacted_prompt)
     if not intent_result["safe"]:
         blocked_reason_msg = intent_result.get("reason", "Violates safety guidelines.")
-        log_event(user_id, redacted_prompt, "BLOCKED_INTENT", blocked_reason=blocked_reason_msg)
+        blocked_response = f"⚠️ Request Blocked: {blocked_reason_msg}"
+        log_event(user_id, redacted_prompt, "BLOCKED_INTENT", response=blocked_response, blocked_reason=blocked_reason_msg)
         return {
             "decision": "BLOCKED_INTENT",
             "reason": blocked_reason_msg,
-            "response": f"⚠️ Request Blocked: {blocked_reason_msg}"
+            "response": blocked_response
         }
         
     # ── ALL GUARDRAILS PASSED — call Claude ──────────────────
