@@ -336,7 +336,10 @@ create table admin_users (
 ## 🛠️ Complete Local Host Setup Guide
 
 ### 1. Configure the Local Environment
-Create a `.env` file in the root of the project:
+Create a `.env` file in the root of the project. You can choose **one of the following two options** to configure your credentials:
+
+#### Option A: Direct Environment Keys (Fallback Mode)
+Define the service keys directly inside your local `.env` file:
 ```env
 # Supabase Configuration
 SUPABASE_URL=https://your-project.supabase.co
@@ -345,6 +348,15 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # Anthropic API
 ANTHROPIC_API_KEY=your-anthropic-api-key
+```
+
+#### Option B: Infisical Integration (Matches Production)
+Define your Infisical machine identity credentials. At startup, the app will automatically authenticate and fetch the service keys dynamically from Infisical:
+```env
+# Infisical Machine Credentials
+INFISICAL_CLIENT_ID=your-infisical-client-id
+INFISICAL_CLIENT_SECRET=your-infisical-client-secret
+INFISICAL_PROJECT_ID=your-infisical-project-id
 ```
 
 ### 2. Run the FastAPI Backend
